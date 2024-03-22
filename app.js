@@ -3,10 +3,11 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 const http = require("http");
-const socketIo = require("socket.io");
 const server = http.createServer(app);
+const { Server } = require("socket.io");
+const io = new Server(server);
+
 const PORT = process.env.PORT || 4001;
-const io = socketIo(server);
 
 app.get("/", (req, res) => {
   res.send("Server is running");
@@ -14,13 +15,8 @@ app.get("/", (req, res) => {
 
 io.on("connection", (socket) => {
   console.log("New client connected");
-  if (interval) {
-    clearInterval(interval);
-  }
-  interval = setInterval(() => getApiAndEmit(socket), 10000);
   socket.on("disconnect", () => {
     console.log("Client disconnected");
-    clearInterval(interval);
   });
 });
 
