@@ -26,12 +26,12 @@ io.on("connection", (socket) => {
 
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
-    for (const lobby in lobbies) {
-      const index = lobbies[lobby.id].indexOf(userId);
+    for (const lobbyId in lobbies) {
+      const index = lobbies[lobbyId].users.indexOf(userId);
       if (index !== -1) {
-        lobbies[lobby.id].splice(index, 1);
-        io.to(lobby.id).emit("lobbyMessage", `${userId} a quitté la salle.`);
-        console.log(`${userId} left lobby ${lobby.id}`);
+        lobbies[lobbyId].users.splice(index, 1);
+        io.to(lobbyId).emit("lobbyMessage", `${userId} a quitté la salle.`);
+        console.log(`${userId} left lobby ${lobbyId}`);
       }
     }
     delete users[userId];
@@ -69,5 +69,7 @@ expressApp.post("/joinLobby", async (req, res) => {
   const { lobby } = req.body;
   const lobbyId = generateUserId();
   await createLobby(lobbyId, lobby.name, lobby.author);
-  res.status(201).json({ message: "Lobby created successfully", lobbyId });
+  res.header("lobbyId", lobbyId);
+  res.header("message", "Lobby created successfully");
+  res.status(201).send();
 });
