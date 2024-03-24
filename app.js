@@ -15,78 +15,119 @@ const users = {};
 
 const lobbies = {};
 
+let lastUserId = 0;
+
 expressApp.use(express.json());
 
 io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
-  const userId = generateUserId();
-  users[userId] = socket.id;
+
+  socket.on("registerUser", (data) => {
+    const { name } = data;
+    const id = generateUserId();
+    users[id] = { socketId: socket.id, username: name };
+    console.log(`User registered: ${name} with ID: ${id}`);
+  });
   socket.on("disconnect", async () => {
     console.log("Client disconnected:", socket.id);
-    const userId = findUserId(socket.id);
-    if (userId) {
-      for (const lobbyId in lobbies) {
-        const index = lobbies[lobbyId].users.indexOf(userId);
-        if (index !== -1) {
-          lobbies[lobbyId].users.splice(index, 1);
-          io.to(lobbyId).emit("lobbyMessage", `${userId} a quitté la salle.`);
-          console.log(`${userId} left lobby ${lobbyId}`);
-          try {
-            await db.collection("lobby").doc(lobbyId).update({
-              users: lobbies[lobbyId].users,
+
+    let lobbyIdFound;
+    for (const [lobbyId, lobby] of Object.entries(lobbies)) {
+      const index = lobby.players.findIndex(
+        (player) => player.id === socket.id
+      );
+      if (index !== -1) {
+        const playerRemoved = lobby.players.splice(index, 1)[0];
+        lobbyIdFound = lobbyId;
+        try {
+          await db
+            .collection("lobby")
+            .doc(lobbyId)
+            .update({
+              players: lobby.players.map((player) => ({
+                id: player.id,
+                name: player.name,
+              })),
             });
-            console.log(
-              `Lobby ${lobbyId} updated in database with new user ${userId}`
-            );
-          } catch (err) {
-            console.error(`Error updating lobby ${lobbyId} in database:`, err);
-          }
+          console.log(
+            `Player ${playerRemoved.name} removed from lobby ${lobbyId} in database.`
+          );
+
+          io.to(lobbyId).emit("updatePlayersList", lobby.players);
+        } catch (err) {
+          console.error(
+            `Error updating lobby ${lobbyId} in database after player disconnect:`,
+            err
+          );
         }
+        break;
       }
-      delete users[userId];
+    }
+
+    if (!lobbyIdFound) {
+      console.log(`No lobby found for the disconnected player: ${socket.id}`);
     }
   });
 
   socket.on("createLobby", (data) => {
     console.log("createLobby event received with data:", data);
-    const userId = findUserId(socket.id);
-    if (userId) {
+    const user = findUser(socket.id);
+    if (user) {
+      const { userId, username } = user;
       const lobbyId = generateLobbyId();
       const { name } = data;
-      createLobby(lobbyId, name, userId);
-      socket.emit("createLobby", { lobbyId });
+      createLobby(lobbyId, name, userId, username);
+      io.emit("lobbyCreated", { lobbyId, name, username });
     } else {
       console.log("No user found");
     }
   });
 
   socket.on("joinLobby", async (data) => {
-    const userId = findUserId(socket.id);
-    if (userId) {
+    const user = findUser(socket.id);
+    if (user) {
+      const { userId, username } = user;
       const { lobbyId } = data;
-      if (lobbies[lobbyId] && lobbies[lobbyId].users.length < 4) {
-        lobbies[lobbyId].users.push(userId);
-        socket.join(lobbyId);
+      const lobby = lobbies[lobbyId];
 
-        io.to(lobbyId).emit("lobbyMessage", `${userId} a rejoint la salle.`);
-        console.log(`${userId} joined lobby ${lobbyId}`);
+      if (lobby) {
+        const isUserAlreadyInLobby = lobby.players.some(
+          (player) => player.id === userId || player.name === username
+        );
 
-        try {
-          await db.collection("lobby").doc(lobbyId).update({
-            users: lobbies[lobbyId].users,
-          });
-          console.log(
-            `Lobby ${lobbyId} updated in database with new user ${userId}`
-          );
-        } catch (err) {
-          console.error(`Error updating lobby ${lobbyId} in database:`, err);
+        if (!isUserAlreadyInLobby && lobby.players.length < 4) {
+          lobby.players.push({ id: userId, name: username });
+          socket.join(lobbyId);
+
+          io.emit("ggez", "ggggggeezezezez");
+          io.to(lobbyId).emit("updatePlayersList", lobby.players);
+          console.log(`${username} joined lobby ${lobbyId}`);
+
+          try {
+            await db
+              .collection("lobby")
+              .doc(lobbyId)
+              .update({
+                players: lobby.players.map((player) => ({
+                  id: player.id,
+                  name: player.name,
+                })),
+              });
+            console.log(
+              `Lobby ${lobbyId} updated in database with new user ${username}`
+            );
+          } catch (err) {
+            console.error(`Error updating lobby ${lobbyId} in database:`, err);
+          }
+        } else {
+          if (isUserAlreadyInLobby) {
+            console.log(`${username} is already in the lobby ${lobbyId}`);
+          } else {
+            console.log(`Lobby ${lobbyId} is full`);
+          }
         }
       } else {
-        if (!lobbies[lobbyId]) {
-          console.log(`Lobby ${lobbyId} does not exist`);
-        } else {
-          console.log(`Lobby ${lobbyId} is full`);
-        }
+        console.log(`Lobby ${lobbyId} does not exist`);
       }
     } else {
       console.log("No user found");
@@ -94,40 +135,50 @@ io.on("connection", (socket) => {
   });
 });
 
-function generateUserId() {
-  return Math.random().toString(36).substr(2, 9);
-}
-
 function generateLobbyId() {
   return Math.random().toString(36).substr(2, 9);
 }
 
-async function createLobby(lobbyId, name, author) {
-  lobbies[lobbyId] = {
-    name: name,
-    author: author,
-    users: [author],
+async function createLobby(lobbyId, lobbyName, id, username) {
+  const newLobby = {
+    id: lobbyId,
+    name: lobbyName,
+    host: { id: id, name: username },
+    players: [{ id: id, name: username }],
   };
+
+  lobbies[lobbyId] = newLobby;
+
   try {
-    await db.collection("lobby").doc(lobbyId).set({
-      id: lobbyId,
-      name: name,
-      author: author,
-      users: lobbies[lobbyId].users,
-    });
+    await db.collection("lobby").doc(lobbyId).set(newLobby);
     console.log("Lobby created:", lobbyId);
   } catch (err) {
-    console.log(err);
+    console.error("Error creating lobby:", err);
   }
 }
 
-function findUserId(socketId) {
+async function deleteLobby(lobbyId) {
+  delete lobbies[lobbyId];
+  io.to(lobbyId).emit("lobbyDeleted", `Lobby ${lobbyId} has been deleted.`);
+  try {
+    await db.collection("lobby").doc(lobbyId).delete();
+    console.log(`Lobby ${lobbyId} deleted from database.`);
+  } catch (err) {
+    console.error(`Error deleting lobby ${lobbyId} from database:`, err);
+  }
+}
+
+function findUser(socketId) {
   for (const userId in users) {
-    if (users[userId] === socketId) {
-      return userId;
+    if (users[userId].socketId === socketId) {
+      return { userId, username: users[userId].username };
     }
   }
   return null;
+}
+
+function generateUserId() {
+  return lastUserId++;
 }
 
 server.listen(PORT, () => {
