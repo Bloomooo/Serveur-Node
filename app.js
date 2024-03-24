@@ -99,8 +99,7 @@ io.on("connection", (socket) => {
           lobby.players.push({ id: userId, name: username });
           socket.join(lobbyId);
 
-          io.emit("ggez", "ggggggeezezezez");
-          io.to(lobbyId).emit("updatePlayersList", lobby.players);
+          io.emit("updatePlayersList", "updatePlayersList");
           console.log(`${username} joined lobby ${lobbyId}`);
 
           try {
@@ -133,6 +132,49 @@ io.on("connection", (socket) => {
       console.log("No user found");
     }
   });
+
+  socket.on("disconnectFromLobby", async (data) => {
+    const user = findUser(socket.id);
+    if (user) {
+      const { userId, username } = user;
+      const { lobbyId } = data;
+      const lobby = lobbies[lobbyId];
+
+      if (lobby) {
+        const index = lobby.players.findIndex((player) => player.id === userId);
+        if (index !== -1) {
+          const playerRemoved = lobby.players.splice(index, 1)[0];
+          try {
+            await db
+              .collection("lobby")
+              .doc(lobbyId)
+              .update({
+                players: lobby.players.map((player) => ({
+                  id: player.id,
+                  name: player.name,
+                })),
+              });
+            console.log(
+              `Player ${playerRemoved.name} removed from lobby ${lobbyId} in database.`
+            );
+
+            io.emit("updatePlayersList", "updatePlayersList");
+          } catch (err) {
+            console.error(
+              `Error updating lobby ${lobbyId} in database after player disconnect:`,
+              err
+            );
+          }
+        } else {
+          console.log(`Player ${username} is not in lobby ${lobbyId}`);
+        }
+      } else {
+        console.log(`Lobby ${lobbyId} does not exist`);
+      }
+    } else {
+      console.log("No user found");
+    }
+  });
 });
 
 function generateLobbyId() {
@@ -154,17 +196,6 @@ async function createLobby(lobbyId, lobbyName, id, username) {
     console.log("Lobby created:", lobbyId);
   } catch (err) {
     console.error("Error creating lobby:", err);
-  }
-}
-
-async function deleteLobby(lobbyId) {
-  delete lobbies[lobbyId];
-  io.to(lobbyId).emit("lobbyDeleted", `Lobby ${lobbyId} has been deleted.`);
-  try {
-    await db.collection("lobby").doc(lobbyId).delete();
-    console.log(`Lobby ${lobbyId} deleted from database.`);
-  } catch (err) {
-    console.error(`Error deleting lobby ${lobbyId} from database:`, err);
   }
 }
 
