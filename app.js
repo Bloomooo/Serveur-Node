@@ -83,7 +83,6 @@ io.on("connection", (socket) => {
   });
 
   socket.on("createLobby", async (data) => {
-    console.log("createLobby event received with data:", data);
     const user = findUser(socket.id);
     if (user) {
       const { userId, username } = user;
@@ -105,6 +104,7 @@ io.on("connection", (socket) => {
       }
 
       createLobby(lobbyId, name, userId, username, nb, lobbyAnimeList);
+      socket.join(lobbyId);
       io.emit("lobbyCreated", { lobbyId, name, username });
     } else {
       console.log("No user found");
@@ -240,6 +240,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("startGame", (data) => {
+    const lobbyId = data.lobbyId;
+    io.to(lobbyId).emit("gameStarted", "gameStarted");
     checkAndStartGame(lobbyId);
   });
 });
@@ -254,7 +256,6 @@ async function createLobby(lobbyId, lobbyName, id, username, nb, animeList) {
     host: { id: id, name: username },
     nb: nb,
     players: [{ id: id, name: username }],
-    animeList: animeList,
   };
 
   lobbies[lobbyId] = newLobby;
@@ -293,9 +294,22 @@ function checkAndStartGame(lobbyId) {
   const numAnimeMax = lobby.nb;
   if (animeList.length >= numAnimeMax) {
     const animeListRandom = selectAnimeRandom(lobbyId, numAnimeMax);
-    for (const anime of animeListRandom) {
-      console.log(anime.title);
-    }
+    let counter = 0;
+    const interval = setInterval(() => {
+      if (counter >= animeListRandom.length) {
+        clearInterval(interval);
+        return;
+      }
+      const anime = animeListRandom[counter];
+      console.log("Sending anime:", anime.title);
+      io.to(lobbyId).emit("sendAnime", {
+        title: anime.title,
+        image: anime.image,
+        length: animeListRandom.length,
+        index: counter + 1,
+      });
+      counter++;
+    }, 30000);
   }
 }
 
