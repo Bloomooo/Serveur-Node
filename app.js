@@ -99,7 +99,6 @@ io.on("connection", (socket) => {
         const anime = { title, image };
         if (!lobbyAnimeList.some((a) => a.title === anime.title)) {
           lobbyAnimeList.push(anime);
-          console.log(anime.title);
         }
       }
 
@@ -158,10 +157,7 @@ io.on("connection", (socket) => {
                     (a) => a.title === anime.title
                   )
                 ) {
-                  console.log(anime.title);
                   animeListsByLobby[lobbyId].push(anime);
-                } else {
-                  console.log(anime.title);
                 }
               }
             }
@@ -294,22 +290,33 @@ function checkAndStartGame(lobbyId) {
   const numAnimeMax = lobby.nb;
   if (animeList.length >= numAnimeMax) {
     const animeListRandom = selectAnimeRandom(lobbyId, numAnimeMax);
-    let counter = 0;
-    const interval = setInterval(() => {
-      if (counter >= animeListRandom.length) {
-        clearInterval(interval);
-        return;
-      }
-      const anime = animeListRandom[counter];
-      console.log("Sending anime:", anime.title);
+
+    setTimeout(() => {
+      const anime = animeListRandom[0];
       io.to(lobbyId).emit("sendAnime", {
         title: anime.title,
         image: anime.image,
         length: animeListRandom.length,
-        index: counter + 1,
+        index: 1,
       });
-      counter++;
-    }, 30000);
+
+      let counter = 1;
+      const interval = setInterval(() => {
+        if (counter >= animeListRandom.length) {
+          clearInterval(interval);
+          return;
+        }
+        const anime = animeListRandom[counter];
+        console.log("Sending anime:", anime.title);
+        io.to(lobbyId).emit("sendAnime", {
+          title: anime.title,
+          image: anime.image,
+          length: animeListRandom.length,
+          index: counter + 1,
+        });
+        counter++;
+      }, 30000);
+    }, 10000);
   }
 }
 
