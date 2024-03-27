@@ -10,6 +10,7 @@ const io = new Server(server);
 const PORT = process.env.PORT || 4001;
 
 const db = require("./db");
+const { log } = require("console");
 
 const users = {};
 const lobbies = {};
@@ -237,8 +238,13 @@ io.on("connection", (socket) => {
 
   socket.on("startGame", (data) => {
     const lobbyId = data.lobbyId;
-    io.to(lobbyId).emit("gameStarted", "gameStarted");
+    io.to(lobbyId).emit("gameStarted", animeListsByLobby[lobbyId]);
     checkAndStartGame(lobbyId);
+  });
+
+  socket.on("sendResults", (data) => {
+    console.log("Results received:", data);
+    processResults(data);
   });
 });
 function generateLobbyId() {
@@ -252,6 +258,7 @@ async function createLobby(lobbyId, lobbyName, id, username, nb, animeList) {
     host: { id: id, name: username },
     nb: nb,
     players: [{ id: id, name: username }],
+    sentAnimes: [],
   };
 
   lobbies[lobbyId] = newLobby;
@@ -293,6 +300,8 @@ function checkAndStartGame(lobbyId) {
 
     setTimeout(() => {
       const anime = animeListRandom[0];
+      console.log("Sending anime:", anime.title);
+      lobby.sentAnimes.push(anime);
       io.to(lobbyId).emit("sendAnime", {
         title: anime.title,
         image: anime.image,
@@ -307,6 +316,7 @@ function checkAndStartGame(lobbyId) {
           return;
         }
         const anime = animeListRandom[counter];
+        lobby.sentAnimes.push(anime);
         console.log("Sending anime:", anime.title);
         io.to(lobbyId).emit("sendAnime", {
           title: anime.title,
@@ -337,6 +347,41 @@ function selectAnimeRandom(lobbyId, maxAnime) {
   }
 
   return shuffledAnime.slice(0, Math.min(maxAnime, shuffledAnime.length));
+}
+
+function processResults(data) {
+  const { lobbyId, username, answer } = data;
+  const lobby = lobbies[lobbyId];
+  if (!lobby) {
+    console.log(`Lobby ${lobbyId} not found.`);
+    return;
+  }
+
+  const lastSentAnime = lobby.sentAnimes[lobby.sentAnimes.length - 1];
+  if (!lastSentAnime) {
+    console.log("No anime was sent recently to this lobby.");
+    return;
+  }
+
+  const isCorrect = lastSentAnime.title.toLowerCase() === answer.toLowerCase();
+
+  const playerIndex = lobby.players.findIndex(
+    (player) => player.name === username
+  );
+  if (playerIndex !== -1) {
+    lobby.players[playerIndex].answer = answer;
+    lobby.players[playerIndex].isCorrect = isCorrect;
+  }
+
+  const results = lobby.players.map((player) => ({
+    username: player.name,
+    answer: player.answer,
+    isCorrect: player.isCorrect || false,
+  }));
+
+  io.to(lobbyId).emit("gameResults", results);
+
+  console.log(`Results sent to lobby ${lobbyId}:`, results);
 }
 
 server.listen(PORT, () => {
