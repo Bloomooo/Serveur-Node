@@ -6,6 +6,8 @@ const http = require("http");
 const server = http.createServer(expressApp);
 const { Server } = require("socket.io");
 const io = new Server(server);
+const path = require("path");
+const fs = require("fs");
 
 const PORT = process.env.PORT || 4001;
 
@@ -251,6 +253,71 @@ io.on("connection", (socket) => {
   socket.on("sendResults", (data) => {
     console.log("Results received:", data);
     processResults(data, io);
+  });
+
+  socket.on("uploadImage", (data) => {
+    const { imageBase64, name } = data;
+    if (!imageBase64) {
+      return;
+    }
+
+    const imageBuffer = Buffer.from(imageBase64, "base64");
+
+    const uploadsDir = path.join(__dirname, "uploads");
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir);
+    }
+    const filePath = path.join(uploadsDir, `${name}.png`);
+
+    fs.writeFile(filePath, imageBuffer, (err) => {
+      if (err) {
+        console.error("Erreur lors de l'enregistrement de l'image", err);
+
+        socket.emit("imageUploadResponse", {
+          success: false,
+          message: "Erreur lors de l'enregistrement de l'image",
+        });
+        return;
+      }
+
+      console.log(`Image sauvegardée : ${filePath}`);
+      const user = users[socket.id];
+      if (user) {
+        user.imagePath = filePath;
+        console.log(`Chemin de l'image ajouté pour l'utilisateur ${name}`);
+      }
+
+      socket.emit("imageUploadResponse", {
+        success: true,
+        message: "Image téléchargée avec succès",
+        filePath,
+      });
+    });
+  });
+  socket.on("downloadImage", (data) => {
+    const { name } = data;
+    const filePath = path.join(__dirname, "uploads", `${name}.png`);
+    if (fs.existsSync(filePath)) {
+      fs.readFile(filePath, (err, data) => {
+        if (err) {
+          console.error("Erreur lors de la lecture de l'image", err);
+          return;
+        }
+
+        const imageBase64 = Buffer.from(data).toString("base64");
+        console.log(
+          `Image lue : ${filePath}, ${imageBase64.length} octets, ${
+            imageBase64.length / 1024
+          } Ko, name: ${name}`
+        );
+        socket.emit("imageDownloadResponse", {
+          success: true,
+          message: "Image téléchargée avec succès",
+          imageBase64,
+          name,
+        });
+      });
+    }
   });
 });
 

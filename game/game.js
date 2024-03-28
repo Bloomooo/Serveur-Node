@@ -48,7 +48,7 @@ function checkAndStartGame(lobbyId, io) {
   }
 }
 
-function processResults(data) {
+function processResults(data, io) {
   const { lobbyId, username, answer } = data;
   const lobby = lobbies[lobbyId];
   if (!lobby) {
