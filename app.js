@@ -9,14 +9,20 @@ const io = new Server(server);
 
 const PORT = process.env.PORT || 4001;
 
-const db = require("./db");
-const { log } = require("console");
+const db = require("./db/db");
 
-const users = {};
-const lobbies = {};
-const animeListsByLobby = {};
+const { generateUserId, findUser, getUser } = require("./user/user");
+const {
+  createLobby,
+  generateLobbyId,
+  getLobbies,
+  getAnimeListByLobby,
+} = require("./lobby/lobby");
+const { checkAndStartGame, processResults } = require("./game/game");
 
-let lastUserId = 0;
+const users = getUser();
+const lobbies = getLobbies();
+const animeListsByLobby = getAnimeListByLobby();
 
 expressApp.use(express.json());
 
@@ -239,150 +245,14 @@ io.on("connection", (socket) => {
   socket.on("startGame", (data) => {
     const lobbyId = data.lobbyId;
     io.to(lobbyId).emit("gameStarted", animeListsByLobby[lobbyId]);
-    checkAndStartGame(lobbyId);
+    checkAndStartGame(lobbyId, io);
   });
 
   socket.on("sendResults", (data) => {
     console.log("Results received:", data);
-    processResults(data);
+    processResults(data, io);
   });
 });
-function generateLobbyId() {
-  return Math.random().toString(36).substr(2, 9);
-}
-
-async function createLobby(lobbyId, lobbyName, id, username, nb, animeList) {
-  const newLobby = {
-    id: lobbyId,
-    name: lobbyName,
-    host: { id: id, name: username },
-    nb: nb,
-    players: [{ id: id, name: username }],
-    sentAnimes: [],
-  };
-
-  lobbies[lobbyId] = newLobby;
-  animeListsByLobby[lobbyId] = animeList;
-
-  try {
-    await db
-      .collection("lobby")
-      .doc(lobbyId)
-      .set({
-        ...newLobby,
-      });
-    console.log("Lobby created:", lobbyId);
-  } catch (err) {
-    console.error("Error creating lobby:", err);
-  }
-}
-function findUser(socketId) {
-  for (const userId in users) {
-    if (users[userId].socketId === socketId) {
-      return { userId, username: users[userId].username };
-    }
-  }
-  return null;
-}
-function checkAndStartGame(lobbyId) {
-  const lobby = lobbies[lobbyId];
-  if (!lobby) return;
-
-  const animeList = animeListsByLobby[lobbyId];
-  if (!animeList || animeList.length === 0) {
-    console.log("No anime list found for the lobby.");
-    return;
-  }
-
-  const numAnimeMax = lobby.nb;
-  if (animeList.length >= numAnimeMax) {
-    const animeListRandom = selectAnimeRandom(lobbyId, numAnimeMax);
-
-    setTimeout(() => {
-      const anime = animeListRandom[0];
-      console.log("Sending anime:", anime.title);
-      lobby.sentAnimes.push(anime);
-      io.to(lobbyId).emit("sendAnime", {
-        title: anime.title,
-        image: anime.image,
-        length: animeListRandom.length,
-        index: 1,
-      });
-
-      let counter = 1;
-      const interval = setInterval(() => {
-        if (counter >= animeListRandom.length) {
-          clearInterval(interval);
-          return;
-        }
-        const anime = animeListRandom[counter];
-        lobby.sentAnimes.push(anime);
-        console.log("Sending anime:", anime.title);
-        io.to(lobbyId).emit("sendAnime", {
-          title: anime.title,
-          image: anime.image,
-          length: animeListRandom.length,
-          index: counter + 1,
-        });
-        counter++;
-      }, 30000);
-    }, 10000);
-  }
-}
-
-function generateUserId() {
-  return lastUserId++;
-}
-function selectAnimeRandom(lobbyId, maxAnime) {
-  const animeList = animeListsByLobby[lobbyId];
-  if (!animeList || animeList.length === 0) {
-    console.log("No anime list found for the lobby.");
-    return [];
-  }
-
-  const shuffledAnime = [...animeList];
-  for (let i = shuffledAnime.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffledAnime[i], shuffledAnime[j]] = [shuffledAnime[j], shuffledAnime[i]];
-  }
-
-  return shuffledAnime.slice(0, Math.min(maxAnime, shuffledAnime.length));
-}
-
-function processResults(data) {
-  const { lobbyId, username, answer } = data;
-  const lobby = lobbies[lobbyId];
-  if (!lobby) {
-    console.log(`Lobby ${lobbyId} not found.`);
-    return;
-  }
-
-  const lastSentAnime = lobby.sentAnimes[lobby.sentAnimes.length - 1];
-  if (!lastSentAnime) {
-    console.log("No anime was sent recently to this lobby.");
-    return;
-  }
-
-  const isCorrect = lastSentAnime.title.toLowerCase() === answer.toLowerCase();
-
-  const playerIndex = lobby.players.findIndex(
-    (player) => player.name === username
-  );
-  if (playerIndex !== -1) {
-    lobby.players[playerIndex].answer = answer;
-    lobby.players[playerIndex].isCorrect = isCorrect;
-  }
-
-  const results = lobby.players.map((player) => ({
-    username: player.name,
-    answer: player.answer,
-    isCorrect: player.isCorrect || false,
-  }));
-
-  io.to(lobbyId).emit("gameResults", results);
-
-  console.log(`Results sent to lobby ${lobbyId}:`, results);
-}
 
 server.listen(PORT, () => {
   console.log(`Listening on port ${PORT}`);
